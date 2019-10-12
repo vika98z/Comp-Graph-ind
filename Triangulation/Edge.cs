@@ -1,9 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Triangulation
 {
@@ -60,11 +56,8 @@ namespace Triangulation
 
         public Edge Flip()
         {
-            PointF tmp = First;
-            First = Second;
-            Second = tmp;
-
-            return this;
+            var a = new Edge(Second, First);
+            return a;
         }
 
         public State intersect(Edge e, ref float t)
@@ -117,6 +110,14 @@ namespace Triangulation
                       (q.X - pp.X) * (r.Y - q.Y);
             if (val == 0) return 0; // точка на ребре
             return (val > 0) ? 1 : -1; // 1 - слева, -1 - справа
+        }
+
+        public bool eqEdges(Edge other)
+        {
+            if (other == null)
+                return false;
+            else
+                return this.First == other.First && this.Second == other.Second;
         }
 
         private float dotProduct(PointF p, PointF q) => (p.X * q.X - p.Y * q.Y);

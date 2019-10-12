@@ -1,11 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Drawing;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace Triangulation
@@ -14,28 +10,23 @@ namespace Triangulation
     {
 
         private Graphics g;
+
         private List<PointF> points = new List<PointF>();
-
-        private Pen pen = new Pen(Color.Black);
-        private SolidBrush brush = new SolidBrush(Color.Blue);
-
-        private List<Edge> edges = new List<Edge>();
         private List<Edge> livingEdges = new List<Edge>();
-
-        private List<Triangle> triangles = new List<Triangle>();
-        private List<Edge> frontier;
+        private List<Edge> frontier = new List<Edge>();
         public Form1()
         {
             InitializeComponent();
+            
             pictureBox1.Image = new Bitmap(pictureBox1.Width, pictureBox1.Height);
             g = Graphics.FromImage(pictureBox1.Image);
+            g.Clear(Color.White);
         }
 
         private void PictureBox1_MouseClick(object sender, MouseEventArgs e)
         {
             points.Add(e.Location);
-            SolidBrush brush = new SolidBrush(Color.Red);
-            g.FillEllipse(brush, e.X - 2.5f, e.Y - 2.5f, 5, 5);
+            g.FillEllipse(new SolidBrush(Color.Red), e.X - 2.5f, e.Y - 2.5f, 5, 5);
             pictureBox1.Invalidate();
         }
 
@@ -52,12 +43,14 @@ namespace Triangulation
             return 0;
         }
 
-        void updateFrontier(List<Edge> frontier, PointF a, PointF b)
+        void updateFrontier(ref List<Edge> frontier, PointF a, PointF b)
         {
             Edge e = new Edge(a, b);
-            if (frontier.First(edge => edge.First == e.First && edge.Second == e.Second) != null)
+            if (frontier.Contains(e))//(frontier.First(edge => edge.First == e.First && edge.Second == e.Second) != null)
             {
-                frontier.Remove(e);
+                int ind = frontier.FindIndex(new Predicate<Edge>(_edge => _edge.Equals(e)));
+                if (ind != -1) frontier.RemoveAt(ind);
+                //frontier.Remove(e);
             }
             else
             {
@@ -78,18 +71,17 @@ namespace Triangulation
             points[0] = points[m];
             points[m] = c;
 
+            Edge helpEdge = new Edge(new PointF(), new PointF());
+            m = 1;//???
             for (int i = 2; i < n; i++)
             {
-                int pos = orientation(points[0], points[i], points[m]);
-                if (pos == 1)/////????
+                Edge.Classify pos = helpEdge.classify(points[i], points[0], points[m]);
+                if (pos == Edge.Classify.LEFT || pos == Edge.Classify.BETWEEN)
                     m = i;
             }
             return new Edge(points[0], points[m]); 
         }
-
-        private void drawEdge(Edge e) => g.DrawLine(pen, e.First, e.Second);
-
-        private void drawPoint(PointF p) => g.FillEllipse(brush, p.X - 3, p.Y - 3, 7, 7);
+        
 
         private double angleBetweenTwoEdges(Edge e1, Edge e2)
         {
@@ -106,38 +98,42 @@ namespace Triangulation
                 Math.Sqrt(a2.X * a2.X + a2.Y * a2.Y))) * (180 / Math.PI);
         }
 
-        public int orientation(PointF pp, PointF q, PointF r)
+        public int orientation(PointF p1, PointF q, PointF p2)
         {
-            float val = (q.Y - pp.Y) * (r.X - q.X) -
-                      (q.X - pp.X) * (r.Y - q.Y);
-            if (val == 0) return 0; // точка на ребре
-            return (val > 0) ? 1 : -1; // 1 - слева, -1 - справа
+            double pos = (p2.Y - p1.Y) * q.X + (p1.X - p2.X) * q.Y + 
+                (p1.Y - p2.Y) * p1.X + (p2.X - p1.X) * p1.Y;
+            if (pos < 0)
+                return -1; // точка справа
+            else if (pos > 0)
+                return 1; // точка слева
+            else
+                return 0; // точка на ребре
         }
 
-        // Поиск первой точки
-        private PointF findFirstPoint(List<PointF> pts)
+        private PointF findFirstPoint(List<PointF> points)
         {
-            float xMin = pictureBox1.Width;
-            PointF firstPoint = pts[0];
+            PointF minPoint = new PointF(pictureBox1.Width, pictureBox1.Height);
+            PointF resPoint = points[0];
 
-            foreach (PointF p in pts)            
-                if (p.X < xMin)
-                {
-                    xMin = p.X;
-                    firstPoint = p;
-                }
+            foreach (PointF p in points)
+            {
+                if (p.X < minPoint.X)
+                    minPoint = resPoint = p;
+                else if (p.X == minPoint.X)
+                    if (p.Y <= minPoint.Y)
+                        minPoint = resPoint = p;
+            }
 
-            return firstPoint;
+            return resPoint;
         }
 
-        // Поиск второй точки
         private PointF findSecondPoint(List<PointF> pts, PointF firstPoint)
         {
             double min = 180;
             PointF secondPoint = firstPoint;
             foreach (PointF p in pts)
             {
-                Edge e1 = new Edge(firstPoint, new PointF(firstPoint.X, firstPoint.Y+1));
+                Edge e1 = new Edge(firstPoint, new PointF(firstPoint.X, firstPoint.Y - 1));
                 Edge e2 = new Edge(firstPoint, p);
                 double angle = angleBetweenTwoEdges(e1, e2);
                 if (angle < min)
@@ -149,66 +145,132 @@ namespace Triangulation
             return secondPoint;
         }
 
-        int mate(Edge e, List<PointF> points, PointF p)
+        bool mate(Edge e, List<PointF> points, int n, ref PointF p)
         {
-            float t;
+            float t = 0; ;
+            PointF bestP = new PointF(-1f, -1f);
             float bestT = float.MaxValue;
             Edge f = new Edge(e);
             f.Rot();
             for (int i = 0; i < n; i++)
             {
-                if (orientation(e.First, points[i], e.Second) == -1)
+                if (e.classify(points[i], e.First, e.Second) == Edge.Classify.RIGHT)
                 {
                     Edge g = new Edge(e.Second, points[i]);
                     g.Rot();
-                    //if (f.Intersection(g.First, t.Second,))
+                    f.intersect(g, ref t);
+                    if (t < bestT)
+                    {
+                        bestP = points[i];
+                        bestT = t;
+                    }
                 }
+            }
+            if (bestP.X != -1f)
+            {
+                p = bestP;
+                return true;
+            }
+            return false;
+        }
+
+        double radiusTriandle(PointF a, PointF b, PointF c)
+        {
+            var center = getCenter();
+            return ((a.Y - b.Y) * center.X + (b.X - a.X) * center.Y + (a.X * b.Y + b.X * a.Y)) / (Math.Sqrt((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y)));
+
+            PointF getCenter()
+            {
+                float x1 = (a.X + b.X) / 2;
+                float y1 = (a.Y + b.Y) / 2;
+
+                float x2 = (a.X + c.X) / 2;
+                float y2 = (a.Y + c.Y) / 2;
+
+                float a1 = b.X - a.X;
+                float b1 = b.Y - a.Y;
+                float c1 = x1 * a1 + y1 * b1;
+
+                float a2 = c.X - a.X;
+                float b2 = c.Y - a.Y;
+                float c2 = x2 * a2 + y2 * b2;
+
+                return new PointF((c1 * b2 - c2 * b1) / (a1 * b2 - a2 * b1), (a1 * c2 - a2 * c1) / (a1 * b2 - a2 * b1));
             }
         }
 
-        List<Triangle> delTriangulation(List<PointF> Points, int n)
+        private void delTriangulation(List<PointF> Points, int n)
         {
-            PointF p;
-            Edge e = hullEdge(Points, n);
-            frontier.Add(e);
-            while (!(frontier.Count == 0))
+            g.Clear(Color.White);
+            PointF firstPoint = findFirstPoint(Points);
+            PointF secondPoint = findSecondPoint(Points, firstPoint);
+            g.FillEllipse(new SolidBrush(Color.Green), firstPoint.X - 2.5f, firstPoint.Y - 2.5f, 5, 5);
+            g.FillEllipse(new SolidBrush(Color.Green), secondPoint.X - 2.5f, secondPoint.Y - 2.5f, 5, 5);
+            livingEdges.Add(new Edge(firstPoint, secondPoint));
+
+            while (livingEdges.Count() > 0)
             {
+                int i = livingEdges.Count() - 1;
+                Edge alive = livingEdges[i];
+                livingEdges.RemoveAt(i);
 
+                g.DrawLine(new Pen(Color.Black), alive.First, alive.Second);
+
+                PointF thirdPoint = PointF.Empty;
+                double radius = double.MaxValue;
+
+                foreach (PointF p in points)
+                {
+                    if (orientation(alive.First, p, alive.Second) == -1)
+                    {
+                        var dist = radiusTriandle(alive.First, alive.Second, p);
+                        if (dist < radius)
+                        {
+                            radius = dist;
+                            thirdPoint = p;
+                        }
+                    }
+
+                    g.FillEllipse(new SolidBrush(Color.Green), p.X - 2.5f, p.Y - 2.5f, 5, 5);
+                }            
+
+                if (thirdPoint != Point.Empty)
+                {
+                    Edge edge = new Edge(alive.First, thirdPoint);
+                    int ind = livingEdges.FindIndex(new Predicate<Edge>(_edge => _edge.eqEdges(edge.Flip())));
+                    if (ind >= 0)
+                    {
+                        g.DrawLine(new Pen(Color.Black), livingEdges[ind].First, livingEdges[ind].Second);
+                        livingEdges.RemoveAt(ind);
+                    }
+                    else
+                        livingEdges.Add(edge);
+
+                    edge = new Edge(thirdPoint, alive.Second);
+                    ind = livingEdges.FindIndex(new Predicate<Edge>(_edge => _edge.eqEdges(edge.Flip())));
+                    if (ind >= 0)
+                    {
+                        g.DrawLine(new Pen(Color.Black), livingEdges[ind].First, livingEdges[ind].Second);
+                        livingEdges.RemoveAt(ind);
+                    }
+                    else
+                        livingEdges.Add(edge);
+                }
             }
-            
-            //bool edgeIsFound = false;
+            pictureBox1.Invalidate();
+        }
 
-            ////redrawTriangulation();
+        private void button1_Click(object sender, EventArgs e)
+        {
+            delTriangulation(points, points.Count);
+        }
 
-            //PointF firstPoint = findFirstPoint(Points);
-            //PointF secondPoint = findSecondPoint(Points, firstPoint);
-
-            //livingEdges.Add(new Edge(firstPoint, secondPoint));
-
-            //while (livingEdges.Count() > 0)
-            //{
-            //    int i = livingEdges.Count() - 1;
-            //    Edge alive = livingEdges[i];
-            //    livingEdges.RemoveAt(i);
-
-            //    PointF thirdPoint = PointF.Empty;
-            //    double radius = double.MaxValue;
-
-            //    foreach (PointF p in points)
-            //    {
-            //        if (orientation(alive.First, p, alive.Second) == -1)
-            //        {
-            //            Triangle triang = new Triangle(alive.First, alive.Second, p);
-            //            if (triang.dist < radius)
-            //            {
-            //                radius = triang.dist;
-            //                thirdPoint = p;
-            //            }
-            //        }
-            //        drawPoint(p);
-            //    }
-
-            //    drawEdge(alive);
+        private void button2_Click(object sender, EventArgs e)
+        {
+            g.Clear(Color.White);
+            livingEdges.Clear();
+            points.Clear();
+            pictureBox1.Invalidate();
         }
     }
 }
